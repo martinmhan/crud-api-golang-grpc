@@ -13,3 +13,7 @@
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
+
+# Generated gRPC files
+server_grpc.pb.go
+server.pb.go
