@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package server;
+
+option go_package = "github.com/martinmhan/crud-api-golang-grpc/api";
+
+service API {
+  rpc createItem(CreateItemRequest) returns (Item) {}
+  rpc readItem(ReadItemRequest) returns (Item) {}
+  rpc updateItem(UpdateItemRequest) returns (MessageResponse) {}
+  rpc deleteItem(DeleteItemRequest) returns (MessageResponse) {}
+}
+
+message Item {
+  string ID = 1;
+  string Name = 2;
+}
+
+message CreateItemRequest {
+  string Name = 1;
+}
+
+message ReadItemRequest {
+  string ID = 1;
+}
+
+message UpdateItemRequest {
+  string ID = 1;
+  string Name = 2;
+}
+
+message DeleteItemRequest {
+  string ID = 1;
+}
+
+message MessageResponse {
+  string message = 1;
+}
