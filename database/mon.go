@@ -6,12 +6,13 @@ import (
 	"os"
 	"time"
 
-	"github.com/joho/godotenv"
-	pb "github.com/martinmhan/crud-api-golang-grpc/proto"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+
+	"github.com/joho/godotenv"
+	"github.com/martinmhan/crud-api-golang-grpc/utils"
 )
 
 // MongoDBAccesser is a Data Access Object that implements the dbAccesser interface
@@ -20,25 +21,18 @@ type MongoDBAccesser struct {
 	dbName     string
 }
 
-// ItemFields is a struct containing all fields of Item minus the ID
-type ItemFields struct {
-	Name string
-}
-
-type idFilter struct {
-	id string
-}
-
 // Connect establishes a client connection to MongoDB and sets it as m.connection
 func (m *MongoDBAccesser) Connect() error {
 	godotenv.Load()
-	connectionURI := os.Getenv("DB_CONNECTION_URI")
+	dbHost := os.Getenv("DB_HOST")
+	dbPort := os.Getenv("DB_PORT")
 	dbName := os.Getenv("DB_NAME")
 
-	if connectionURI == "" || dbName == "" {
+	if dbHost == "" || dbPort == "" || dbName == "" {
 		log.Fatal("Missing DB environment variables")
 	}
 
+	connectionURI := "mongodb://" + dbHost + ":" + dbPort + "/"
 	client, err := mongo.NewClient(options.Client().ApplyURI(connectionURI))
 	if err != nil {
 		log.Fatal("Error connection to MongoDB: ", err)
@@ -60,110 +54,105 @@ func (m *MongoDBAccesser) Connect() error {
 }
 
 // InsertItem adds an item to mongodb collection
-func (m *MongoDBAccesser) InsertItem(item interface{}) *pb.Item {
+func (m *MongoDBAccesser) InsertItem(f ItemFields) Item {
 	if m.connection == nil {
 		log.Fatal("DBAccesser is not connected to a database")
 	}
 
-	log.Println("item: ", item)
-	i, ok := item.(ItemFields)
-	if !ok {
-		log.Fatal("Invalid item")
-	}
-
-	insertResult, err := m.connection.Database(m.dbName).Collection("items").InsertOne(context.TODO(), i)
+	insertResult, err := m.connection.Database(m.dbName).Collection("items").InsertOne(context.TODO(), f)
 	if err != nil {
 		log.Fatal("Error inserting item: ", err)
 	}
 
-	log.Println("insertResult: ", insertResult)
-	log.Println("insertResult.InsertedID: ", insertResult.InsertedID)
-	id := insertResult.InsertedID.(primitive.ObjectID).Hex()
-
-	log.Println("id: ", id)
-
-	return &pb.Item{
-		ID:   id,
-		Name: i.Name,
+	return Item{
+		ID:   insertResult.InsertedID.(primitive.ObjectID).Hex(),
+		Name: f.Name,
 	}
 }
 
-// GetItem ...
-func (m *MongoDBAccesser) GetItem(id interface{}) *pb.Item {
+// GetAllItems returns all items in the mongodb items collection
+func (m *MongoDBAccesser) GetAllItems() []Item {
 	if m.connection == nil {
 		log.Fatal("DBAccesser is not connected to a database")
 	}
 
-	i, ok := id.(string)
-	if !ok {
-		log.Fatal("Invalid id")
+	f := bson.M{}
+	cursor, err := m.connection.Database(m.dbName).Collection("items").Find(context.TODO(), f)
+	utils.FailOnError(err, "Error getting all items")
+
+	var records []bson.M
+	err = cursor.All(context.TODO(), &records)
+	utils.FailOnError(err, "Error reading all items")
+
+	items := []Item{}
+	for _, r := range records {
+		items = append(items, Item{
+			ID:   r["_id"].(primitive.ObjectID).Hex(),
+			Name: r["name"].(string),
+		})
 	}
 
-	f := idFilter{
-		id: i,
+	return items
+}
+
+// GetItem reads an item from the mongodb collection given an ID
+func (m *MongoDBAccesser) GetItem(id string) Item {
+	if m.connection == nil {
+		log.Fatal("DBAccesser is not connected to a database")
 	}
 
-	it := pb.Item{
-		ID: i,
-	}
-	err := m.connection.Database(m.dbName).Collection("items").FindOne(context.TODO(), f).Decode(&it)
+	record := bson.M{}
+
+	_id, err := primitive.ObjectIDFromHex(id)
+	utils.FailOnError(err, "Invalid id")
+
+	f := bson.M{"_id": _id}
+	result := m.connection.Database(m.dbName).Collection("items").FindOne(context.TODO(), f)
+	err = result.Decode(&record)
 	if err != nil {
-		log.Fatalf("Error decoding item: %v", err)
+		log.Printf("Error decoding document: %s", err)
+		return Item{}
 	}
 
-	return &it
+	return Item{
+		ID:   record["_id"].(primitive.ObjectID).Hex(),
+		Name: record["name"].(string),
+	}
 }
 
 // UpdateItem updates an item in the mongo collection
-func (m *MongoDBAccesser) UpdateItem(id interface{}, updates interface{}) error {
+func (m *MongoDBAccesser) UpdateItem(item Item) error {
 	if m.connection == nil {
 		log.Fatal("DBAccesser is not connected to a database")
 	}
 
-	idStr, ok := id.(string)
-	if !ok {
-		log.Fatal("Invalid id")
-	}
-
-	id, _ = primitive.ObjectIDFromHex(idStr)
-
-	upd, ok := updates.(ItemFields)
-	if !ok {
-		log.Fatal("Invalid updates")
-	}
+	id, err := primitive.ObjectIDFromHex(item.ID)
+	utils.FailOnError(err, "Invalid ID")
 
 	f := bson.M{"_id": id}
 	u := bson.M{
-		"$set": bson.M{"name": upd.Name},
+		"$set": bson.M{"name": item.Name},
 	}
 
-	log.Println("u: ", u)
-	r, err := m.connection.Database(m.dbName).Collection("items").UpdateOne(context.TODO(), f, u)
-	if err != nil {
-		return err
-	}
+	_, err = m.connection.Database(m.dbName).Collection("items").UpdateOne(context.TODO(), f, u)
+	utils.FailOnError(err, "Error updating item")
 
-	log.Println("*r: ", *r)
 	return nil
 }
 
 // DeleteItem deletes an item from the mongo collection by ID
-func (m *MongoDBAccesser) DeleteItem(id interface{}) error {
+func (m *MongoDBAccesser) DeleteItem(id string) error {
 	if m.connection == nil {
 		log.Fatal("DBAccesser is not connected to a database")
 	}
 
-	s, ok := id.(string)
-	if !ok {
-		log.Fatal("Invalid id")
-	}
+	i, err := primitive.ObjectIDFromHex(id)
+	utils.FailOnError(err, "Invalid ID")
 
-	i := idFilter{id: s}
-	_, err := m.connection.Database(m.dbName).Collection("items").DeleteOne(context.TODO(), i)
-	if err != nil {
-		log.Fatalf("Error deleting item: %v", err)
-		return err
-	}
+	f := bson.M{"_id": i}
+	log.Println("f: ", f)
+	_, err = m.connection.Database(m.dbName).Collection("items").DeleteOne(context.TODO(), f)
+	utils.FailOnError(err, "Failed to delete item")
 
 	return nil
 }

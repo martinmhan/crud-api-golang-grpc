@@ -5,10 +5,15 @@ package server;
 option go_package = "github.com/martinmhan/crud-api-golang-grpc/api";
 
 service API {
-  rpc createItem(CreateItemRequest) returns (Item) {}
-  rpc readItem(ReadItemRequest) returns (Item) {}
-  rpc updateItem(UpdateItemRequest) returns (MessageResponse) {}
-  rpc deleteItem(DeleteItemRequest) returns (MessageResponse) {}
+  rpc createItem(ItemFields) returns (SimpleMessage) {}
+  rpc readAllItems(SimpleMessage) returns (Items) {}
+  rpc readItem(ItemID) returns (Item) {}
+  rpc updateItem(Item) returns (SimpleMessage) {}
+  rpc deleteItem(ItemID) returns (SimpleMessage) {}
+}
+
+message SimpleMessage {
+  string message = 1;
 }
 
 message Item {
@@ -16,23 +21,14 @@ message Item {
   string Name = 2;
 }
 
-message CreateItemRequest {
+message Items {
+  repeated Item items = 1;
+}
+
+message ItemFields {
   string Name = 1;
 }
 
-message ReadItemRequest {
+message ItemID {
   string ID = 1;
-}
-
-message UpdateItemRequest {
-  string ID = 1;
-  string Name = 2;
-}
-
-message DeleteItemRequest {
-  string ID = 1;
-}
-
-message MessageResponse {
-  string message = 1;
 }
